@@ -134,6 +134,8 @@ class Planner(Node):
         #     body_pt = np.array([traj.x, traj.y, 0.0, 1.0])
         #     world_pt = (w_T_b @ body_pt)[:2]
         #     trajs_in_world.append(world_pt)
+        #
+        # trajs_in_world = np.array(trajs_in_world)
         # -> optimized
         pts = np.array([[pt.x, pt.y, 0.0, 1.0] for pt in raw_trajectory[3:]]).T
         trajs_in_world = (w_T_b @ pts)[:2, :].T
@@ -141,8 +143,6 @@ class Planner(Node):
         if len(trajs_in_world) == 0:
             self.get_logger().warn('No waypoints after skipping first 3')
             return
-
-        trajs_in_world = np.array(trajs_in_world)
 
         # --------------------------------------------------------
         # slowdown interpolate
