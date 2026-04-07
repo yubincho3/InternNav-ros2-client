@@ -107,7 +107,7 @@ class Planner(Node):
         if odom_infer is not None:
             self.process_trajectory(msg.waypoints, odom_infer)
 
-    def server_discrete_callback(self, msg: DiscreteStamped):
+    def discrete_callback(self, msg: DiscreteStamped):
         image_time = msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9
         odom_infer = self.find_odom_at_time(image_time)
         if odom_infer is not None:
