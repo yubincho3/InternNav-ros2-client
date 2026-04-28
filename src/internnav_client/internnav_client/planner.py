@@ -10,11 +10,12 @@ from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 # ros2 msgs
 from geometry_msgs.msg import Point, Pose
 from nav_msgs.msg import Odometry
+from std_msgs.msg import Empty
 
 import numpy as np
 
 # User defined modules
-import utils
+from internnav_client import utils
 
 # User defined msgs
 from internnav_interfaces.msg import DiscreteStamped, Trajectory, TrajectoryStamped
@@ -45,7 +46,7 @@ class Planner(Node):
             history=HistoryPolicy.KEEP_LAST,
             depth=10,
         )
-        self.odom_sub = self.create_subscription(
+        self.create_subscription(
             Odometry,
             '/utlidar/robot_odom',
             self.odom_callback,
@@ -53,13 +54,13 @@ class Planner(Node):
         )
         self.odom_queue: deque[tuple[float, tuple[float, float, float]]] = deque(maxlen=50)
 
-        self.traj_sub = self.create_subscription(
+        self.create_subscription(
             TrajectoryStamped,
             '/internnav/server/trajectory',
             self.trajectory_callback,
             1
         )
-        self.discrete_sub = self.create_subscription(
+        self.create_subscription(
             DiscreteStamped,
             '/internnav/server/discrete',
             self.discrete_callback,
@@ -74,6 +75,11 @@ class Planner(Node):
         self.cmd_pose_pub = self.create_publisher(
             Pose,
             '/internnav/client/cmd_pose',
+            1
+        )
+        self.cmd_stop_pub = self.create_publisher(
+            Empty,
+            '/internnav/client/stop',
             1
         )
 
@@ -108,10 +114,15 @@ class Planner(Node):
             self.process_trajectory(msg.waypoints, odom_infer)
 
     def discrete_callback(self, msg: DiscreteStamped):
+        actions = list(msg.actions)
+        if actions == [DiscreteStamped.STOP]:
+            self.cmd_stop_pub.publish(Empty())
+            return
+
         image_time = msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9
         odom_infer = self.find_odom_at_time(image_time)
         if odom_infer is not None:
-            self.process_discrete(list(msg.actions), odom_infer)
+            self.process_discrete(actions, odom_infer)
 
     def process_trajectory(
         self,
@@ -163,7 +174,7 @@ class Planner(Node):
         self.cmd_traj_pub.publish(msg)
 
     def process_discrete(self, actions: list[int], odom_infer: tuple[float, float, float]):
-        if actions == [5] or actions == [9]:
+        if actions == [DiscreteStamped.LOOK_DOWN]:
             return
 
         x, y, yaw = odom_infer

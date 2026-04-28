@@ -8,15 +8,16 @@ from rclpy.node import Node
 # ros2 msgs
 from geometry_msgs.msg import Pose
 from nav_msgs.msg import Odometry
+from std_msgs.msg import Empty
 
 from unitree_sdk2py.go2.sport.sport_client import SportClient
 
 import numpy as np
 
 # User defined modules
-from mpc import MPCController
-from pd import PDController
-import utils
+from internnav_client.mpc import MPCController
+from internnav_client.pd import PDController
+from internnav_client import utils
 
 # User defined msgs
 from internnav_interfaces.msg import Trajectory
@@ -48,22 +49,28 @@ class Controller(Node):
 
         self.create_timer(1/hz, self.control_loop)
 
-        self.odom_sub = self.create_subscription(
+        self.create_subscription(
             Odometry,
             '/utlidar/robot_odom',
             self.odom_callback,
             1
         )
-        self.traj_sub = self.create_subscription(
+        self.create_subscription(
             Trajectory,
             '/internnav/client/cmd_traj',
             self.traj_callback,
             1
         )
-        self.cmd_pose_sub = self.create_subscription(
+        self.create_subscription(
             Pose,
             '/internnav/client/cmd_pose',
             self.cmd_pose_callback,
+            1
+        )
+        self.create_subscription(
+            Empty,
+            '/internnav/client/stop',
+            self.stop_callback,
             1
         )
 
@@ -73,17 +80,23 @@ class Controller(Node):
 
         self.get_logger().info('Controller initialized')
 
+    def _move(self, v: float, w: float):
+        self.sport_client.Move(v, 0.0, w)
+
     def control_loop(self):
-        if self.mode == ControlMode.MPC:
-            if self.mpc is None or self.odom is None:
+        if self.mode == ControlMode.IDLE or self.odom is None:
+            return
+
+        elif self.mode == ControlMode.MPC:
+            if self.mpc is None:
                 return
 
             opt_u, _ = self.mpc.solve(np.array(self.odom))
             v, w = float(opt_u[0, 0]), float(opt_u[0, 1])
-            self.sport_client.Move(v, 0.0, w)
+            self._move(v, w)
 
         elif self.mode == ControlMode.PD:
-            if self.odom is None or self.vel is None or self.target_pose is None:
+            if self.vel is None or self.target_pose is None:
                 return
 
             v, w, e_p, e_r = self.pd.solve(
@@ -103,7 +116,7 @@ class Controller(Node):
             if v < 0.0:
                 v = 0.0
 
-            self.sport_client.Move(v, 0.0, w)
+            self._move(v, w)
 
     def odom_callback(self, msg: Odometry):
         pose = msg.pose.pose
@@ -129,6 +142,11 @@ class Controller(Node):
             self.mpc.update_ref_traj(waypoints)
 
         self.mode = ControlMode.MPC
+
+    def stop_callback(self, _):
+        self.mode = ControlMode.IDLE
+        self._move(0.0, 0.0)
+        self.get_logger().info('STOP received: switching to IDLE')
 
 def main(args=None):
     rclpy.init(args=args)
