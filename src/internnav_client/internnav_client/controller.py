@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional
+from typing import Optional, Tuple
 
 # ros2
 import rclpy
@@ -11,6 +11,7 @@ from nav_msgs.msg import Odometry
 from std_msgs.msg import Empty
 
 from unitree_sdk2py.go2.sport.sport_client import SportClient
+from unitree_sdk2py.core.channel import ChannelFactoryInitialize
 
 import numpy as np
 
@@ -31,6 +32,7 @@ class Controller(Node):
     def __init__(self, hz=100.0):
         super().__init__('internnav_controller')
 
+        ChannelFactoryInitialize(1, 'eth0')
         self.sport_client = SportClient()
         self.sport_client.SetTimeout(10.0)
         self.sport_client.Init()
@@ -74,9 +76,9 @@ class Controller(Node):
             1
         )
 
-        self.odom: Optional[tuple[float, float, float]] = None
-        self.vel: Optional[tuple[float, float]] = None
-        self.target_pose: Optional[tuple[float, float, float]] = None
+        self.odom: Optional[Tuple[float, float, float]] = None
+        self.vel: Optional[Tuple[float, float]] = None
+        self.target_pose: Optional[Tuple[float, float, float]] = None
 
         self.get_logger().info('Controller initialized')
 
@@ -158,7 +160,6 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

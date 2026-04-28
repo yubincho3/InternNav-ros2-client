@@ -1,6 +1,6 @@
 import math
 from collections import deque
-from typing import Optional
+from typing import Optional, Tuple, List, Deque
 
 # ros2
 import rclpy
@@ -52,7 +52,7 @@ class Planner(Node):
             self.odom_callback,
             qos
         )
-        self.odom_queue: deque[tuple[float, tuple[float, float, float]]] = deque(maxlen=50)
+        self.odom_queue: Deque[Tuple[float, Tuple[float, float, float]]] = deque(maxlen=50)
 
         self.create_subscription(
             TrajectoryStamped,
@@ -94,7 +94,7 @@ class Planner(Node):
         odom = (msg.pose.pose.position.x, msg.pose.pose.position.y, yaw)
         self.odom_queue.append((timestamp, odom))
 
-    def find_odom_at_time(self, target_sec: float) -> Optional[tuple[float, float, float]]:
+    def find_odom_at_time(self, target_sec: float) -> Optional[Tuple[float, float, float]]:
         if not self.odom_queue:
             return None
 
@@ -126,8 +126,8 @@ class Planner(Node):
 
     def process_trajectory(
         self,
-        raw_trajectory: list[Point],
-        odom_infer: tuple[float, float, float]
+        raw_trajectory: List[Point],
+        odom_infer: Tuple[float, float, float]
     ):
         x, y, yaw = odom_infer
 
@@ -173,7 +173,7 @@ class Planner(Node):
         ]
         self.cmd_traj_pub.publish(msg)
 
-    def process_discrete(self, actions: list[int], odom_infer: tuple[float, float, float]):
+    def process_discrete(self, actions: List[int], odom_infer: Tuple[float, float, float]):
         if actions == [DiscreteStamped.LOOK_DOWN]:
             return
 
@@ -213,7 +213,6 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
