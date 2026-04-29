@@ -23,14 +23,14 @@ from internnav_interfaces.msg import DiscreteStamped, Trajectory, TrajectoryStam
 class Planner(Node):
     def __init__(
         self,
-        slowdown_factor: int = 4,
-        odom_timeout_sec: float = 0.5,
-        rotation_degree: int = 12
+        slowdown_factor: int = 1,
+        odom_timeout_sec: float = 1.0,
+        rotation_degree: int = 15
     ):
         super().__init__('internnav_planner')
 
         assert type(slowdown_factor) is int, 'slowdown factor must be an integer!'
-        assert slowdown_factor > 1, 'slowdown factor must be greater than 1!'
+        assert slowdown_factor >= 1, 'slowdown factor must be greater than or equal to 1!'
         self.slowdown_factor = slowdown_factor
 
         assert odom_timeout_sec >= 0, 'odom timeout must be non-negative!'
@@ -52,7 +52,7 @@ class Planner(Node):
             self.odom_callback,
             qos
         )
-        self.odom_queue: Deque[Tuple[float, Tuple[float, float, float]]] = deque(maxlen=50)
+        self.odom_queue: Deque[Tuple[float, Tuple[float, float, float]]] = deque(maxlen=100)
 
         self.create_subscription(
             TrajectoryStamped,
@@ -94,24 +94,12 @@ class Planner(Node):
         odom = (msg.pose.pose.position.x, msg.pose.pose.position.y, yaw)
         self.odom_queue.append((timestamp, odom))
 
-    def find_odom_at_time(self, target_sec: float) -> Optional[Tuple[float, float, float]]:
-        if not self.odom_queue:
-            return None
-
-        best_time, best_odom = min(self.odom_queue, key=lambda x: abs(x[0] - target_sec))
-        t_diff = abs(best_time - target_sec)
-
-        if t_diff > self.odom_timeout_sec:
-            self.get_logger().warn(f'Odom match failed: time difference too big ({t_diff:.3f}s)')
-            return None
-
-        return best_odom
-
     def trajectory_callback(self, msg: TrajectoryStamped):
-        image_time = msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9
-        odom_infer = self.find_odom_at_time(image_time)
-        if odom_infer is not None:
-            self.process_trajectory(msg.waypoints, odom_infer)
+        if not self.odom_queue:
+            self.get_logger().warn('No odom available for trajectory')
+            return
+        _, odom_infer = self.odom_queue[-1]
+        self.process_trajectory(msg.waypoints, odom_infer)
 
     def discrete_callback(self, msg: DiscreteStamped):
         actions = list(msg.actions)
@@ -119,10 +107,11 @@ class Planner(Node):
             self.cmd_stop_pub.publish(Empty())
             return
 
-        image_time = msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9
-        odom_infer = self.find_odom_at_time(image_time)
-        if odom_infer is not None:
-            self.process_discrete(actions, odom_infer)
+        if not self.odom_queue:
+            self.get_logger().warn('No odom available for discrete')
+            return
+        _, odom_infer = self.odom_queue[-1]
+        self.process_discrete(actions, odom_infer)
 
     def process_trajectory(
         self,
