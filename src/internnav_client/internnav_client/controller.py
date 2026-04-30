@@ -38,12 +38,7 @@ class Controller(Node):
         # self.sport_client = SportClient()
         # self.sport_client.SetTimeout(10.0)
         # self.sport_client.Init()
-        self.sport_pub = self.create_publisher(
-            Request,
-            '/api/sport/request',
-            10
-        )
-        self.get_logger().info('Go2 sport client initialized.')
+        # self.get_logger().info('Go2 sport client initialized.')
 
         self.mode = ControlMode.IDLE
         self.mpc: Optional[MPCController] = None
@@ -57,6 +52,12 @@ class Controller(Node):
         )
 
         self.create_timer(1/hz, self.control_loop)
+
+        self.sport_pub = self.create_publisher(
+            Request,
+            '/api/sport/request',
+            10
+        )
 
         self.create_subscription(
             Odometry,
@@ -122,18 +123,14 @@ class Controller(Node):
                 self.vel
             )
 
-            # --------------------------------------------------------
-            # 정지 마찰력 극복을 위한 최소 각속도 보장 (Deadband 보상)
+            # ----------------------- Deadband -----------------------
             MIN_W = 0.5
 
             if abs(e_r) >= 0.05 and abs(w) < MIN_W:
                 w = MIN_W if w > 0 else -MIN_W
             # --------------------------------------------------------
 
-            if v < 0.0:
-                v = 0.0
-
-            self._move(v, w)
+            self._move(max(v, 0.0), w)
 
     def odom_callback(self, msg: Odometry):
         pose = msg.pose.pose
@@ -163,7 +160,7 @@ class Controller(Node):
     def stop_callback(self, _):
         self.mode = ControlMode.IDLE
         self._move(0.0, 0.0)
-        self.get_logger().info('STOP received: switching to IDLE')
+        self.get_logger().info('`STOP` received, switching to IDLE')
 
 def main(args=None):
     rclpy.init(args=args)

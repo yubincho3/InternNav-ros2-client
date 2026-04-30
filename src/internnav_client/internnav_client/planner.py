@@ -1,6 +1,6 @@
 import math
 from collections import deque
-from typing import Optional, Tuple, List, Deque
+from typing import Deque, List, Tuple
 
 # ros2
 import rclpy
@@ -33,13 +33,14 @@ class Planner(Node):
         assert slowdown_factor >= 1, 'slowdown factor must be greater than or equal to 1!'
         self.slowdown_factor = slowdown_factor
 
-        assert odom_timeout_sec >= 0, 'odom timeout must be non-negative!'
-        self.odom_timeout_sec = odom_timeout_sec
-
+        # pre-compute rotation matrix
         rad = math.radians(rotation_degree)
         c, s = math.cos(rad), math.sin(rad)
         self.rot_left  = np.array([[c, -s, 0], [ s, c, 0], [0, 0, 1]])
         self.rot_right = np.array([[c,  s, 0], [-s, c, 0], [0, 0, 1]])
+
+        assert odom_timeout_sec >= 0, 'odom timeout must be non-negative!'
+        self.odom_timeout_sec = odom_timeout_sec
 
         qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -52,7 +53,7 @@ class Planner(Node):
             self.odom_callback,
             qos
         )
-        self.odom_queue: Deque[Tuple[float, Tuple[float, float, float]]] = deque(maxlen=100)
+        self.odom_queue: Deque[Tuple[float, float, float]] = deque(maxlen=100)
 
         self.create_subscription(
             TrajectoryStamped,
@@ -90,15 +91,13 @@ class Planner(Node):
             msg.pose.pose.orientation.z,
             msg.pose.pose.orientation.w
         )
-        timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9
-        odom = (msg.pose.pose.position.x, msg.pose.pose.position.y, yaw)
-        self.odom_queue.append((timestamp, odom))
+        self.odom_queue.append((msg.pose.pose.position.x, msg.pose.pose.position.y, yaw))
 
     def trajectory_callback(self, msg: TrajectoryStamped):
         if not self.odom_queue:
             self.get_logger().warn('No odom available for trajectory')
             return
-        _, odom_infer = self.odom_queue[-1]
+        odom_infer = self.odom_queue[-1]
         self.process_trajectory(msg.waypoints, odom_infer)
 
     def discrete_callback(self, msg: DiscreteStamped):
@@ -110,7 +109,7 @@ class Planner(Node):
         if not self.odom_queue:
             self.get_logger().warn('No odom available for discrete')
             return
-        _, odom_infer = self.odom_queue[-1]
+        odom_infer = self.odom_queue[-1]
         self.process_discrete(actions, odom_infer)
 
     def process_trajectory(
