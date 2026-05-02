@@ -7,9 +7,9 @@ import rclpy
 from rclpy.node import Node
 
 # ros2 msgs
-from geometry_msgs.msg import Pose
-from nav_msgs.msg import Odometry
-from std_msgs.msg import Empty
+from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Odometry, Path
+from std_msgs.msg import Header
 
 # from unitree_sdk2py.go2.sport.sport_client import SportClient
 # from unitree_sdk2py.core.channel import ChannelFactoryInitialize
@@ -21,9 +21,6 @@ import numpy as np
 from internnav_client.mpc import MPCController
 from internnav_client.pd import PDController
 from internnav_client import utils
-
-# User defined msgs
-from internnav_interfaces.msg import Trajectory
 
 class ControlMode(Enum):
     IDLE = 0
@@ -66,27 +63,28 @@ class Controller(Node):
             1
         )
         self.create_subscription(
-            Trajectory,
-            '/internnav/client/cmd_traj',
-            self.traj_callback,
+            Path,
+            '/internnav/client/cmd_path',
+            self.cmd_path_callback,
             1
         )
         self.create_subscription(
-            Pose,
+            PoseStamped,
             '/internnav/client/cmd_pose',
             self.cmd_pose_callback,
             1
         )
         self.create_subscription(
-            Empty,
-            '/internnav/client/stop',
-            self.stop_callback,
+            Header,
+            '/internnav/client/cmd_stop',
+            self.cmd_stop_callback,
             1
         )
 
         self.odom: Optional[Tuple[float, float, float]] = None
         self.vel: Optional[Tuple[float, float]] = None
         self.target_pose: Optional[Tuple[float, float, float]] = None
+        self.last_stop_time: int = 0
 
         self.get_logger().info('Controller initialized')
 
@@ -94,9 +92,9 @@ class Controller(Node):
         req = Request()
         req.header.identity.api_id = 1008
         req.parameter = json.dumps({
-            "x": float(v),
-            "y": 0.0,
-            "z": float(w),
+            'x': float(v),
+            'y': 0.0,
+            'z': float(w),
         })
         self.sport_pub.publish(req)
         # self.sport_client.Move(v, 0.0, w)
@@ -142,24 +140,49 @@ class Controller(Node):
         if self.target_pose is None:
             self.target_pose = self.odom
 
-    def cmd_pose_callback(self, msg: Pose):
-        target_yaw = utils.to_yaw(msg.orientation.z, msg.orientation.w)
-        self.target_pose = (msg.position.x, msg.position.y, target_yaw)
+    def cmd_pose_callback(self, msg: PoseStamped):
+        if msg.header.frame_id != 'odom':
+            self.get_logger().error('cmd_pose_callback: frame_id != "odom"')
+            return
+
+        stamp = msg.header.stamp
+        now = utils.to_nanosec(stamp.sec, stamp.nanosec)
+
+        if self.last_stop_time >= now:
+            self.get_logger().warn(f'Stale cmd_pose discarded (Msg: {now} <= Stop: {self.last_stop_time})')
+            return
+
+        target_yaw = utils.to_yaw(msg.pose.orientation.z, msg.pose.orientation.w)
+        self.target_pose = (msg.pose.position.x, msg.pose.position.y, target_yaw)
         self.mode = ControlMode.PD
 
-    def traj_callback(self, msg: Trajectory):
-        waypoints = np.array([[p.x, p.y] for p in msg.waypoints])
+    def cmd_path_callback(self, msg: Path):
+        if msg.header.frame_id != 'odom':
+            self.get_logger().error('cmd_path_callback: frame_id != "odom"')
+            return
+
+        stamp = msg.header.stamp
+        now = utils.to_nanosec(stamp.sec, stamp.nanosec)
+
+        if self.last_stop_time >= now:
+            self.get_logger().warn(f'Stale cmd_path discarded (Msg: {now} <= Stop: {self.last_stop_time})')
+            return
+
+        trajs = np.array([(pose.pose.position.x, pose.pose.position.y) for pose in msg.poses])
 
         if self.mpc is None:
-            self.mpc = MPCController(waypoints)
+            self.mpc = MPCController(trajs)
         else:
-            self.mpc.update_ref_traj(waypoints)
+            self.mpc.update_ref_traj(trajs)
 
         self.mode = ControlMode.MPC
 
-    def stop_callback(self, _):
-        self.mode = ControlMode.IDLE
+    def cmd_stop_callback(self, header: Header):
+        stamp = header.stamp
+        self.last_stop_time = utils.to_nanosec(stamp.sec, stamp.nanosec)
+
         self._move(0.0, 0.0)
+        self.mode = ControlMode.IDLE
         self.get_logger().info('`STOP` received, switching to IDLE')
 
 def main(args=None):

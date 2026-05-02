@@ -13,3 +13,6 @@ def to_homo(x, y, yaw) -> np.ndarray:
         [0,  0, 1, 0],
         [0,  0, 0, 1],
     ])
+
+def to_nanosec(sec: int, nanosec: int) -> int:
+    return nanosec + sec * 1_000_000_000

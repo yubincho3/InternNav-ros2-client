@@ -8,9 +8,9 @@ from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 # ros2 msgs
-from geometry_msgs.msg import Point, Pose
-from nav_msgs.msg import Odometry
-from std_msgs.msg import Empty
+from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Odometry, Path
+from std_msgs.msg import Header
 
 import numpy as np
 
@@ -18,13 +18,12 @@ import numpy as np
 from internnav_client import utils
 
 # User defined msgs
-from internnav_interfaces.msg import DiscreteStamped, Trajectory, TrajectoryStamped
+from internnav_interfaces.msg import DiscreteStamped
 
 class Planner(Node):
     def __init__(
         self,
         slowdown_factor: int = 1,
-        odom_timeout_sec: float = 1.0,
         rotation_degree: int = 15
     ):
         super().__init__('internnav_planner')
@@ -38,9 +37,6 @@ class Planner(Node):
         c, s = math.cos(rad), math.sin(rad)
         self.rot_left  = np.array([[c, -s, 0], [ s, c, 0], [0, 0, 1]])
         self.rot_right = np.array([[c,  s, 0], [-s, c, 0], [0, 0, 1]])
-
-        assert odom_timeout_sec >= 0, 'odom timeout must be non-negative!'
-        self.odom_timeout_sec = odom_timeout_sec
 
         qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -56,31 +52,31 @@ class Planner(Node):
         self.odom_queue: Deque[Tuple[float, float, float]] = deque(maxlen=100)
 
         self.create_subscription(
-            TrajectoryStamped,
-            '/internnav/server/trajectory',
-            self.trajectory_callback,
+            Path,
+            '/internnav/server/system1/output_path',
+            self.path_callback,
             1
         )
         self.create_subscription(
             DiscreteStamped,
-            '/internnav/server/discrete',
-            self.discrete_callback,
+            '/internnav/server/system2/output_discretes',
+            self.discretes_callback,
             1
         )
 
-        self.cmd_traj_pub = self.create_publisher(
-            Trajectory,
-            '/internnav/client/cmd_traj',
+        self.cmd_path_pub = self.create_publisher(
+            Path,
+            '/internnav/client/cmd_path',
             1
         )
         self.cmd_pose_pub = self.create_publisher(
-            Pose,
+            PoseStamped,
             '/internnav/client/cmd_pose',
             1
         )
         self.cmd_stop_pub = self.create_publisher(
-            Empty,
-            '/internnav/client/stop',
+            Header,
+            '/internnav/client/cmd_stop',
             1
         )
 
@@ -93,28 +89,32 @@ class Planner(Node):
         )
         self.odom_queue.append((msg.pose.pose.position.x, msg.pose.pose.position.y, yaw))
 
-    def trajectory_callback(self, msg: TrajectoryStamped):
+    def path_callback(self, msg: Path):
         if not self.odom_queue:
             self.get_logger().warn('No odom available for trajectory')
             return
-        odom_infer = self.odom_queue[-1]
-        self.process_trajectory(msg.waypoints, odom_infer)
 
-    def discrete_callback(self, msg: DiscreteStamped):
+        odom_infer = self.odom_queue[-1]
+        self.process_path(msg, odom_infer)
+
+    def discretes_callback(self, msg: DiscreteStamped):
         actions = list(msg.actions)
+
         if actions == [DiscreteStamped.STOP]:
-            self.cmd_stop_pub.publish(Empty())
+            header = Header(stamp=msg.header.stamp, frame_id='')
+            self.cmd_stop_pub.publish(header)
             return
 
         if not self.odom_queue:
             self.get_logger().warn('No odom available for discrete')
             return
-        odom_infer = self.odom_queue[-1]
-        self.process_discrete(actions, odom_infer)
 
-    def process_trajectory(
+        odom_infer = self.odom_queue[-1]
+        self.process_discretes(actions, msg.header, odom_infer)
+
+    def process_path(
         self,
-        raw_trajectory: List[Point],
+        base_msg: Path,
         odom_infer: Tuple[float, float, float]
     ):
         x, y, yaw = odom_infer
@@ -127,16 +127,16 @@ class Planner(Node):
         ])
 
         # trajs_in_world = []
-        # for i, traj in enumerate(raw_trajectory):
+        # for i, pose in enumerate(base_msg.poses):
         #     if i < 3:
         #         continue
-        #     body_pt = np.array([traj.x, traj.y, 0.0, 1.0])
+        #     body_pt = np.array([pose.pose.position.x, pose.pose.position.y, 0.0, 1.0])
         #     world_pt = (w_T_b @ body_pt)[:2]
         #     trajs_in_world.append(world_pt)
         #
         # trajs_in_world = np.array(trajs_in_world)
         # -> optimized
-        pts = np.array([[pt.x, pt.y, 0.0, 1.0] for pt in raw_trajectory[3:]]).T
+        pts = np.array([[pose.pose.position.x, pose.pose.position.y, 0.0, 1.0] for pose in base_msg.poses[3:]]).T
         trajs_in_world = (w_T_b @ pts)[:2, :].T
 
         if len(trajs_in_world) == 0:
@@ -154,14 +154,22 @@ class Planner(Node):
             trajs_in_world = np.column_stack((x_interp, y_interp))
         # --------------------------------------------------------
 
-        msg = Trajectory()
-        msg.waypoints = [
-            Point(x=float(x), y=float(y), z=0.0)
-            for x, y in trajs_in_world
-        ]
-        self.cmd_traj_pub.publish(msg)
+        msg = Path()
+        msg.header.frame_id = 'odom'
+        msg.header.stamp = base_msg.header.stamp
 
-    def process_discrete(self, actions: List[int], odom_infer: Tuple[float, float, float]):
+        for x, y in trajs_in_world:
+            pose = PoseStamped()
+
+            pose.header = msg.header
+            pose.pose.position.x = x
+            pose.pose.position.y = y
+
+            msg.poses.append(pose)
+
+        self.cmd_path_pub.publish(msg)
+
+    def process_discretes(self, actions: List[int], header: Header, odom_infer: Tuple[float, float, float]):
         if actions == [DiscreteStamped.LOOK_DOWN]:
             return
 
@@ -182,14 +190,16 @@ class Planner(Node):
         final_y = homo_goal[1, 3]
         final_yaw = math.atan2(homo_goal[1, 0], homo_goal[0, 0])
 
-        pose_msg = Pose()
-        pose_msg.position.x = float(final_x)
-        pose_msg.position.y = float(final_y)
-        pose_msg.position.z = 0.0
-        pose_msg.orientation.z = math.sin(final_yaw / 2)
-        pose_msg.orientation.w = math.cos(final_yaw / 2)
+        msg = PoseStamped()
 
-        self.cmd_pose_pub.publish(pose_msg)
+        msg.header.frame_id = 'odom'
+        msg.header.stamp = header.stamp
+        msg.pose.position.x = float(final_x)
+        msg.pose.position.y = float(final_y)
+        msg.pose.orientation.z = math.sin(final_yaw / 2)
+        msg.pose.orientation.w = math.cos(final_yaw / 2)
+
+        self.cmd_pose_pub.publish(msg)
 
 def main(args=None):
     rclpy.init(args=args)
