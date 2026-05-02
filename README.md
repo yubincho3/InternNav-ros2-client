@@ -2,6 +2,23 @@
 
 Real-time robot control workspace for InternNav. Runs on the Unitree Go2 robot and consumes server outputs to generate low-level velocity commands at 100 Hz.
 
+## Prerequisites
+
+### zenoh-bridge-ros2dds
+
+Install and run zenoh-bridge-ros2dds on both the server and client machines.
+Refer to the [official documentation](https://zenoh.io/docs/getting-started/installation/).
+> The version must match on both the server and client. 
+
+```bash
+echo '
+TODO!!!
+' >> <path to zenoh config>
+```
+>  Zenoh config file should be a '.json5' format
+
+---
+
 ## Package
 
 | Package | Build Type | Description |
@@ -133,7 +150,22 @@ colcon build --symlink-install
 ## Launch
 
 ```bash
+# Terminal 1. Turn on zenoh bridge
+zenoh-bridge-ros2dds -c <path to zenoh config>
+
+# Terminal 2. Launch InternNav client
 source /opt/ros/<distro>/setup.bash
+source install/setup.bash
+ros2 launch internnav_client realworld.launch.py
+```
+
+```bash
+#### Example ####
+# Terminal 1. Turn on zenoh bridge
+zenoh-bridge-ros2dds -c zenoh-config.json5
+
+# Terminal 2. Launch client
+source /opt/ros/foxy/setup.bash
 source install/setup.bash
 ros2 launch internnav_client realworld.launch.py
 ```
