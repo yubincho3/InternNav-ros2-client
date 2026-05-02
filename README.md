@@ -172,3 +172,12 @@ ros2 launch internnav_client realworld.launch.py
 
 Launches both `internnav_controller` and `internnav_planner` with output to screen.  
 No additional arguments are required; parameters can be overridden with `param_file` or via `ros2 param set` at runtime.
+
+## Acknowledgements
+
+This project is based on [InternNav](https://github.com/InternRobotics/InternNav) by Intern Robotics.
+The original codebase has been adapted from an HTTP/multi-threaded architecture to a ROS 2 architecture for real-world deployment on the Unitree Go2.
+
+## License
+
+This project is licensed under the Apache 2.0 License. See [LICENSE](LICENSE) for details.
