@@ -2,7 +2,7 @@
 
 Real-time robot control workspace for InternNav. Runs on the Unitree Go2 robot and consumes server outputs to generate low-level velocity commands at 100 Hz.
 
-## Prerequisites
+## 🔧 Prerequisites
 
 ### zenoh-bridge-ros2dds
 
@@ -19,7 +19,7 @@ TODO!!!
 
 ---
 
-## Package
+## 📦 Package
 
 | Package | Build Type | Description |
 |---------|------------|-------------|
@@ -27,7 +27,7 @@ TODO!!!
 
 ---
 
-## Nodes
+## 🤖 Nodes
 
 ### `internnav_planner` — Path Transformation & Action Dispatch
 
@@ -102,7 +102,7 @@ Runs a 100 Hz feedback loop and issues velocity commands to the Unitree Go2 via 
 
 ---
 
-## Build
+## 🛠️ Build
 
 ```bash
 mkdir -p InternNav_ws/src
@@ -147,7 +147,7 @@ colcon build --symlink-install
 
 ---
 
-## Launch
+## 🚀 Launch
 
 ```bash
 # Terminal 1. Turn on zenoh bridge
@@ -173,11 +173,11 @@ ros2 launch internnav_client realworld.launch.py
 Launches both `internnav_controller` and `internnav_planner` with output to screen.  
 No additional arguments are required; parameters can be overridden with `param_file` or via `ros2 param set` at runtime.
 
-## Acknowledgements
+## 👏 Acknowledgements
 
 This project is based on [InternNav](https://github.com/InternRobotics/InternNav) by Intern Robotics.
 The original codebase has been adapted from an HTTP/multi-threaded architecture to a ROS 2 architecture for real-world deployment on the Unitree Go2.
 
-## License
+## 📄 License
 
 This project is licensed under the Apache 2.0 License. See [LICENSE](LICENSE) for details.
