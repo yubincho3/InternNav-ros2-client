@@ -1,4 +1,5 @@
 import json
+import time
 from enum import Enum
 from typing import Optional, Tuple
 
@@ -11,8 +12,6 @@ from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry, Path
 from std_msgs.msg import Header
 
-# from unitree_sdk2py.go2.sport.sport_client import SportClient
-# from unitree_sdk2py.core.channel import ChannelFactoryInitialize
 from unitree_api.msg import Request
 
 import numpy as np
@@ -31,12 +30,6 @@ class Controller(Node):
     def __init__(self, hz=100.0):
         super().__init__('internnav_controller')
 
-        # ChannelFactoryInitialize(1, 'eth0')
-        # self.sport_client = SportClient()
-        # self.sport_client.SetTimeout(10.0)
-        # self.sport_client.Init()
-        # self.get_logger().info('Go2 sport client initialized.')
-
         self.mode = ControlMode.IDLE
         self.mpc: Optional[MPCController] = None
         self.pd = PDController(
@@ -52,8 +45,8 @@ class Controller(Node):
 
         self.sport_pub = self.create_publisher(
             Request,
-            '/api/sport/request',
-            10
+            '/api/obstacles_avoid/request',
+            1
         )
 
         self.create_subscription(
@@ -90,14 +83,19 @@ class Controller(Node):
 
     def _move(self, v: float, w: float):
         req = Request()
-        req.header.identity.api_id = 1008
+        req.header.identity.id = time.monotonic_ns()
+        req.header.identity.api_id = 1003
+        req.header.lease.id = 0
+        req.header.policy.priority = 0
+        req.header.policy.noreply = True
         req.parameter = json.dumps({
             'x': float(v),
             'y': 0.0,
             'z': float(w),
+            'mode': 0
         })
+        req.binary = []
         self.sport_pub.publish(req)
-        # self.sport_client.Move(v, 0.0, w)
 
     def control_loop(self):
         if self.mode == ControlMode.IDLE or self.odom is None:
