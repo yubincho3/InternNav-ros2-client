@@ -23,13 +23,13 @@ TODO!!!
 
 | Package | Build Type | Description |
 |---------|------------|-------------|
-| `internnav_client` | ament_python | Planner and Controller nodes |
+| `internnav_client` | ament_python | Planner and Controller lifecycle nodes |
 
 ---
 
 ## 🤖 Nodes
 
-### `internnav_planner` — Path Transformation & Action Dispatch
+### `internnav_planner` — Path Transformation & Action Dispatch *(LifecycleNode)*
 
 Receives outputs from both server nodes and prepares them for the controller.
 
@@ -42,11 +42,11 @@ Receives outputs from both server nodes and prepares them for the controller.
 
 **Subscribed Topics**
 
-| Topic | Type | Description |
-|-------|------|-------------|
-| `/utlidar/robot_odom` | `nav_msgs/Odometry` | Robot odometry for frame transforms |
-| `/internnav/server/system1/output_path` | `nav_msgs/Path` | Trajectory in `base_footprint` frame from System1 |
-| `/internnav/server/system2/output_discretes` | `internnav_interfaces/DiscreteStamped` | Discrete actions from System2 |
+| Topic | Type | Lifecycle | Description |
+|-------|------|-----------|-------------|
+| `/utlidar/robot_odom` | `nav_msgs/Odometry` | active only | Robot odometry for frame transforms |
+| `/internnav/server/system1/output_path` | `nav_msgs/Path` | active only | Trajectory in `base_footprint` frame from System1 |
+| `/internnav/server/system2/output_discretes` | `internnav_interfaces/DiscreteStamped` | active only | Discrete actions from System2 |
 
 **Published Topics**
 
@@ -67,7 +67,7 @@ Receives outputs from both server nodes and prepares them for the controller.
 
 ---
 
-### `internnav_controller` — Real-time Motion Control
+### `internnav_controller` — Real-time Motion Control *(LifecycleNode)*
 
 Runs a 100 Hz feedback loop and issues velocity commands to the Unitree Go2 via the sport API.
 
@@ -79,24 +79,24 @@ Runs a 100 Hz feedback loop and issues velocity commands to the Unitree Go2 via 
 
 **Subscribed Topics**
 
-| Topic | Type | Description |
-|-------|------|-------------|
-| `/utlidar/robot_odom` | `nav_msgs/Odometry` | Current robot state |
-| `/internnav/client/cmd_path` | `nav_msgs/Path` | Trajectory command → switches to MPC mode |
-| `/internnav/client/cmd_pose` | `geometry_msgs/PoseStamped` | Goal pose → switches to PD mode |
-| `/internnav/client/cmd_stop` | `std_msgs/Header` | Switches to IDLE mode immediately |
+| Topic | Type | Lifecycle | Description |
+|-------|------|-----------|-------------|
+| `/utlidar/robot_odom` | `nav_msgs/Odometry` | active only | Current robot state |
+| `/internnav/client/cmd_path` | `nav_msgs/Path` | active only | Trajectory command → switches to MPC mode |
+| `/internnav/client/cmd_pose` | `geometry_msgs/PoseStamped` | active only | Goal pose → switches to PD mode |
+| `/internnav/client/cmd_stop` | `std_msgs/Header` | active only | Switches to IDLE mode immediately |
 
 **Published Topics**
 
 | Topic | Type | Description |
 |-------|------|-------------|
-| `/api/sport/request` | `unitree_api/Request` | JSON-encoded sport API command (API ID 1008) |
+| `/api/obstacles_avoid/request` | `unitree_api/Request` | JSON-encoded sport API command (API ID 1003) |
 
 **Control modes**
 
 | Mode | Trigger | Controller | Description |
 |------|---------|------------|-------------|
-| `IDLE` | `cmd_stop` | — | No output |
+| `IDLE` | `cmd_stop` or deactivate | — | No output |
 | `MPC` | `cmd_path` | `MPCController` | Trajectory tracking |
 | `PD` | `cmd_pose` | `PDController` | Executes a single short-step primitive from a discrete action |
 
@@ -171,7 +171,8 @@ ros2 launch internnav_client realworld.launch.py
 ```
 
 Launches both `internnav_controller` and `internnav_planner` with output to screen.  
-No additional arguments are required; parameters can be overridden with `param_file` or via `ros2 param set` at runtime.
+Both nodes start in inactive state and wait for activation via `internnav_manager`.  
+Parameters are read at configure time — to change them, deactivate → cleanup → re-configure or pass via `param_file` at launch.
 
 ## 👏 Acknowledgements
 
