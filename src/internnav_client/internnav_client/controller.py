@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 
 # ros2
 import rclpy
-from rclpy.node import Node
+from rclpy.lifecycle import LifecycleNode, TransitionCallbackReturn, State
 
 # ros2 msgs
 from geometry_msgs.msg import PoseStamped
@@ -26,13 +26,26 @@ class ControlMode(Enum):
     PD   = 1
     MPC  = 2
 
-class Controller(Node):
-    def __init__(self, hz=100.0):
+class Controller(LifecycleNode):
+    def __init__(self):
         super().__init__('internnav_controller')
 
-        self.mode = ControlMode.IDLE
-        self.mpc: Optional[MPCController] = None
-        self.pd = PDController(
+        self.declare_parameter('hz', 100.0)
+
+    def on_configure(self, state: State) -> TransitionCallbackReturn:
+        hz = self.get_parameter('hz')\
+            .get_parameter_value()\
+            .double_value
+
+        # ChannelFactoryInitialize(1, 'eth0')
+        # self.sport_client = SportClient()
+        # self.sport_client.SetTimeout(10.0)
+        # self.sport_client.Init()
+        # self.get_logger().info('Go2 sport client initialized.')
+
+        self._mode = ControlMode.IDLE
+        self._mpc: Optional[MPCController] = None
+        self._pd = PDController(
             Kp_trans=2.0,
             Kd_trans=0.0,
             Kp_yaw=1.5,
@@ -41,45 +54,72 @@ class Controller(Node):
             max_w=0.5
         )
 
-        self.create_timer(1/hz, self.control_loop)
+        self._reset_state()
 
-        self.sport_pub = self.create_publisher(
+        self._sport_pub = self.create_lifecycle_publisher(
             Request,
             '/api/obstacles_avoid/request',
             1
         )
 
-        self.create_subscription(
+        self._timer = self.create_timer(1 / hz, self.control_loop)
+
+        self.get_logger().info('Controller initialized')
+        return TransitionCallbackReturn.SUCCESS
+
+    def on_activate(self, state: State) -> TransitionCallbackReturn:
+        self._odom_sub = self.create_subscription(
             Odometry,
             '/utlidar/robot_odom',
             self.odom_callback,
             1
         )
-        self.create_subscription(
+        self._cmd_path_sub = self.create_subscription(
             Path,
             '/internnav/client/cmd_path',
             self.cmd_path_callback,
             1
         )
-        self.create_subscription(
+        self._cmd_pose_sub = self.create_subscription(
             PoseStamped,
             '/internnav/client/cmd_pose',
             self.cmd_pose_callback,
             1
         )
-        self.create_subscription(
+        self._cmd_stop_sub = self.create_subscription(
             Header,
             '/internnav/client/cmd_stop',
             self.cmd_stop_callback,
             1
         )
 
-        self.odom: Optional[Tuple[float, float, float]] = None
-        self.vel: Optional[Tuple[float, float]] = None
-        self.target_pose: Optional[Tuple[float, float, float]] = None
-        self.last_stop_time: int = 0
+        self.get_logger().info('Controller activated')
+        return super().on_activate(state)
 
-        self.get_logger().info('Controller initialized')
+    def on_deactivate(self, state: State) -> TransitionCallbackReturn:
+        self.destroy_subscription(self._odom_sub)
+        self.destroy_subscription(self._cmd_path_sub)
+        self.destroy_subscription(self._cmd_pose_sub)
+        self.destroy_subscription(self._cmd_stop_sub)
+        self._move(0.0, 0.0)
+        self._mode = ControlMode.IDLE
+        self._reset_state()
+        self.get_logger().info('Controller deactivated')
+        return super().on_deactivate(state)
+
+    def on_cleanup(self, state: State) -> TransitionCallbackReturn:
+        self._timer.cancel()
+        return TransitionCallbackReturn.SUCCESS
+
+    def on_shutdown(self, state: State) -> TransitionCallbackReturn:
+        return TransitionCallbackReturn.SUCCESS
+
+    def _reset_state(self):
+        self._odom: Optional[Tuple[float, float, float]] = None
+        self._vel: Optional[Tuple[float, float]] = None
+        self._target_pose: Optional[Tuple[float, float, float]] = None
+        self._last_stop_time: int = 0
+        self._mpc = None
 
     def _move(self, v: float, w: float):
         req = Request()
@@ -95,28 +135,28 @@ class Controller(Node):
             'mode': 0
         })
         req.binary = []
-        self.sport_pub.publish(req)
+        self._sport_pub.publish(req)
 
     def control_loop(self):
-        if self.mode == ControlMode.IDLE or self.odom is None:
+        if self._mode == ControlMode.IDLE or self._odom is None:
             return
 
-        elif self.mode == ControlMode.MPC:
-            if self.mpc is None:
+        elif self._mode == ControlMode.MPC:
+            if self._mpc is None:
                 return
 
-            opt_u, _ = self.mpc.solve(np.array(self.odom))
+            opt_u, _ = self._mpc.solve(np.array(self._odom))
             v, w = float(opt_u[0, 0]), float(opt_u[0, 1])
             self._move(v, w)
 
-        elif self.mode == ControlMode.PD:
-            if self.vel is None or self.target_pose is None:
+        elif self._mode == ControlMode.PD:
+            if self._vel is None or self._target_pose is None:
                 return
 
-            v, w, e_p, e_r = self.pd.solve(
-                utils.to_homo(*self.odom),
-                utils.to_homo(*self.target_pose),
-                self.vel
+            v, w, e_p, e_r = self._pd.solve(
+                utils.to_homo(*self._odom),
+                utils.to_homo(*self._target_pose),
+                self._vel
             )
 
             # ----------------------- Deadband -----------------------
@@ -132,11 +172,11 @@ class Controller(Node):
         pose = msg.pose.pose
         yaw = utils.to_yaw(pose.orientation.z, pose.orientation.w)
 
-        self.odom = (pose.position.x, pose.position.y, yaw)
-        self.vel = (msg.twist.twist.linear.x, msg.twist.twist.angular.z)
+        self._odom = (pose.position.x, pose.position.y, yaw)
+        self._vel = (msg.twist.twist.linear.x, msg.twist.twist.angular.z)
 
-        if self.target_pose is None:
-            self.target_pose = self.odom
+        if self._target_pose is None:
+            self._target_pose = self._odom
 
     def cmd_pose_callback(self, msg: PoseStamped):
         if msg.header.frame_id != 'odom':
@@ -146,13 +186,13 @@ class Controller(Node):
         stamp = msg.header.stamp
         now = utils.to_nanosec(stamp.sec, stamp.nanosec)
 
-        if self.last_stop_time >= now:
-            self.get_logger().warn(f'Stale cmd_pose discarded (Msg: {now} <= Stop: {self.last_stop_time})')
+        if self._last_stop_time >= now:
+            self.get_logger().warn(f'Stale cmd_pose discarded (Msg: {now} <= Stop: {self._last_stop_time})')
             return
 
         target_yaw = utils.to_yaw(msg.pose.orientation.z, msg.pose.orientation.w)
-        self.target_pose = (msg.pose.position.x, msg.pose.position.y, target_yaw)
-        self.mode = ControlMode.PD
+        self._target_pose = (msg.pose.position.x, msg.pose.position.y, target_yaw)
+        self._mode = ControlMode.PD
 
     def cmd_path_callback(self, msg: Path):
         if msg.header.frame_id != 'odom':
@@ -162,25 +202,25 @@ class Controller(Node):
         stamp = msg.header.stamp
         now = utils.to_nanosec(stamp.sec, stamp.nanosec)
 
-        if self.last_stop_time >= now:
-            self.get_logger().warn(f'Stale cmd_path discarded (Msg: {now} <= Stop: {self.last_stop_time})')
+        if self._last_stop_time >= now:
+            self.get_logger().warn(f'Stale cmd_path discarded (Msg: {now} <= Stop: {self._last_stop_time})')
             return
 
         trajs = np.array([(pose.pose.position.x, pose.pose.position.y) for pose in msg.poses])
 
-        if self.mpc is None:
-            self.mpc = MPCController(trajs)
+        if self._mpc is None:
+            self._mpc = MPCController(trajs)
         else:
-            self.mpc.update_ref_traj(trajs)
+            self._mpc.update_ref_traj(trajs)
 
-        self.mode = ControlMode.MPC
+        self._mode = ControlMode.MPC
 
     def cmd_stop_callback(self, header: Header):
         stamp = header.stamp
-        self.last_stop_time = utils.to_nanosec(stamp.sec, stamp.nanosec)
+        self._last_stop_time = utils.to_nanosec(stamp.sec, stamp.nanosec)
 
         self._move(0.0, 0.0)
-        self.mode = ControlMode.IDLE
+        self._mode = ControlMode.IDLE
         self.get_logger().info('`STOP` received, switching to IDLE')
 
 def main(args=None):
